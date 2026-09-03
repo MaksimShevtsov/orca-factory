@@ -1,7 +1,7 @@
 ---
 name: Executor
-agent: opencode
-model: zai-coding-plan/glm-5.3-flash
+agent: agy
+model: gemini-3.8-flash
 effort: high
 ---
 
