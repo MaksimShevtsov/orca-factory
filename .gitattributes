@@ -2,6 +2,11 @@
 # shebang makes bash fail with "bad interpreter: /usr/bin/env bash^M".
 *.sh text eol=lf
 
+# bin/factory has no extension, and *.tmpl renders INTO executable scripts —
+# a CRLF template produces a broken evals/run.sh in every generated project.
+bin/* text eol=lf
+*.tmpl text eol=lf
+
 # Keep the rest normalized too; agents diff these constantly.
 *.md text eol=lf
 *.yaml text eol=lf
