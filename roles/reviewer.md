@@ -1,7 +1,7 @@
 ---
 name: Reviewer
-agent: claude
-model: claude-opus-5
+agent: opencode
+model: zai-coding-plan/glm-5.3
 effort: high
 ---
 
