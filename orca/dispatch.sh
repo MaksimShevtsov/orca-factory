@@ -45,6 +45,16 @@ case " $(echo $KNOWN_AGENTS) " in
 ' | grep -v '^$' | sort | column -c 76 2>/dev/null        || echo "$KNOWN_AGENTS" >&2 ;;
 esac
 
+# Orca knowing the name is NOT proof the agent can run. Verified 2026-09-03 on
+# this host: `codex` is configured but not installed at all; `gemini` is both,
+# yet dies at an auth wall; `claude` is both, yet exits at its Bypass Permissions
+# consent screen. Installation is the cheapest of those to check, so check it.
+if ! command -v "$AGENT" >/dev/null 2>&1; then
+  echo "warning: '$AGENT' (roles/$ROLE.md) is not installed on this host." >&2
+  echo "         Orca has it configured, but the binary is not on PATH, so the" >&2
+  echo "         terminal will open a shell and the dispatch will time out." >&2
+fi
+
 # --model/--effort are accepted only for these agents; --effort requires --model.
 # Every other agent takes its model from its own config (opencode: $ORCA_OPENCODE_CONFIG_DIR).
 ARGS=(orchestration worker-start --task "$TASK" --worktree current --agent "$AGENT")
@@ -102,6 +112,30 @@ if h:
 
 if [ -n "$RECOVER" ]; then
   HANDLE="${RECOVER%% *}"; PRIOR="${RECOVER##* }"
+
+  # Only reuse a terminal whose AGENT is still alive. When an agent exits during
+  # startup -- claude quits after printing the Bypass Permissions consent screen
+  # if that consent was never accepted -- the terminal falls back to a bare
+  # shell, and a bare shell reports tui-idle just as happily as a ready agent.
+  # Injecting a task spec there types it into PowerShell. Refuse instead.
+  TITLE="$(orca terminal show --terminal "$HANDLE" --json 2>/dev/null     | python -c 'import sys,json
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+r=d.get("result") or {}; t=r.get("terminal") or r
+print((t.get("title") or "").lower())' 2>/dev/null)"
+  case "$TITLE" in
+    *powershell.exe*|*pwsh.exe*|*cmd.exe*|*bash.exe*|*/bin/sh*|*/bin/bash*)
+      echo "error: $AGENT exited during startup; terminal $HANDLE is a bare shell" >&2
+      echo "       ($TITLE)" >&2
+      echo "       Refusing to inject the task into a shell. Common cause: the agent's" >&2
+      echo "       default args need a one-time interactive consent (claude:" >&2
+      echo "       --dangerously-skip-permissions). Accept it once in an Orca terminal," >&2
+      echo "       or change the agent's default args in Orca settings." >&2
+      printf '%s
+' "$OUT"
+      exit 1 ;;
+  esac
+
   echo "note: $AGENT stalled at prompt injection; reusing terminal $HANDLE" >&2
   orca terminal wait --terminal "$HANDLE" --for tui-idle --timeout-ms 60000 --json >/dev/null 2>&1
   RETRY=(orchestration worker-start --task "$TASK" --terminal "$HANDLE" --worktree current)
