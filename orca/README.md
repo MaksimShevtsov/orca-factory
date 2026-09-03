@@ -112,3 +112,39 @@ An agent Orca has not configured fails with `agent_unconfigured` — the same
 error you get for a name that does not exist, so the message alone will not tell
 you which of the two happened. Check the role's `agent:` against the configured
 set before assuming Orca is broken.
+
+`dispatch.sh` carries a hardcoded list of the configured agents and warns before
+Orca gets the chance to, because that error is otherwise unactionable.
+
+## The fresh-launch race
+
+Verified against opencode 1.18.27, and worth knowing before you conclude an
+agent is unsupported:
+
+`worker-start --agent opencode` reports `agent_prompt_stalled` at
+`dispatch_input`. The agent is **not** broken — its TUI comes up perfectly, and
+`terminal wait --for tui-idle` on the very same terminal returns
+`satisfied: true` a moment later. worker-start simply gives up on prompt
+injection before the TUI is ready to take input.
+
+The terminal it created is left running. So the recovery is to reuse the exact
+terminal that just "failed" rather than spawn another:
+
+```sh
+orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
+orca orchestration worker-start --task <task_id> --terminal <handle>   --worktree current --retry-of <failed_dispatch_id> --json
+```
+
+That returns `state: ready`, `stage: input_accepted`, and the worker reports
+`worker_done` normally. **`dispatch.sh` does this automatically** — it detects
+`agent_prompt_stalled`, pulls the created terminal out of the failed receipt's
+`effects`, waits for idle, and retries against it.
+
+Two traps in implementing that, both of which cost a debugging cycle here:
+
+- **`worker-start` exits 1 on a failed dispatch** ("exits 0 only for ready"), so
+  under `set -e` the script dies before any recovery code runs. Guard the call.
+- **A reused terminal is retained, not released.** `worker-release` deliberately
+  never closes a pre-existing terminal, so a recovered worker leaves its terminal
+  open. That is correct behavior, not a leak — but it means the sidebar
+  accumulates one terminal per recovered agent until you close them.
