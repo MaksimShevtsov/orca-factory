@@ -1,0 +1,8 @@
+# Shell scripts must stay LF. On checkout with core.autocrlf=true, a CRLF
+# shebang makes bash fail with "bad interpreter: /usr/bin/env bash^M".
+*.sh text eol=lf
+
+# Keep the rest normalized too; agents diff these constantly.
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
