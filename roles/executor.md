@@ -1,7 +1,7 @@
 ---
 name: Executor
-agent: codex
-model: gpt-5.6-luna
+agent: agy
+model: gemini-3.8-flash-high
 effort: high
 ---
 

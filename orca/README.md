@@ -116,6 +116,51 @@ set before assuming Orca is broken.
 `dispatch.sh` carries a hardcoded list of the configured agents and warns before
 Orca gets the chance to, because that error is otherwise unactionable.
 
+## What actually runs here
+
+Verified 2026-09-03 by dispatching real probes, not by reading Orca's agent list.
+That list is a poor predictor:
+
+| Agent | Configured in Orca | Installed | Dispatches |
+|---|---|---|---|
+| opencode | yes | yes | **yes**, via the stalled-launch recovery |
+| agy | **no** | yes | **yes**, via the two-step path below |
+| claude | yes | yes | no — exits at its Bypass Permissions consent screen |
+| gemini | yes | yes | no — CLI dies at an auth wall |
+| codex | yes | **no** | no — terminal opens a shell, dispatch times out |
+
+Three different failures, and Orca reports the first two as *configured*. Hence
+`dispatch.sh` checks installation itself, and the `agents` gate says
+"configured+installed" rather than "launchable" — because only a real dispatch
+proves launchable, and no gate here performs one.
+
+## Driving an agent Orca cannot launch
+
+`worker-start --agent <name>` only works for names in Orca's set. But Orca can
+**supervise** any agent once a terminal is already running it — the injection and
+`worker_done` machinery does not care what the CLI is. So an installed agent
+outside the set is driven in two steps:
+
+```sh
+orca terminal create --worktree current --title worker-<role> --command '<agent launch cmd>' --json
+orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 90000 --json
+orca orchestration worker-start --task <task_id> --terminal <handle> --worktree current --json
+```
+
+`dispatch.sh` takes this path automatically for any role whose `agent:` is
+installed but not Orca-launchable. Verified end to end with agy (Antigravity CLI
+1.1.25, `gemini-3.8-flash-high`): `state: ready`, `stage: input_accepted`, and
+the worker returned `worker_done` with `outcome: succeeded`.
+
+Two things that will bite you:
+
+- **The agent's own workspace-trust prompt must be accepted once, by hand.**
+  Until then `terminal wait` returns `satisfied: false` with a `blockedReason`.
+- **After accepting it, that terminal stays unusable.** The accepted prompt
+  remains in the scrollback and keeps matching Orca's detector, so it reports
+  blocked forever. Start a fresh terminal; trust is persisted and the new one
+  comes up clean.
+
 ## The fresh-launch race
 
 Verified against opencode 1.18.27, and worth knowing before you conclude an

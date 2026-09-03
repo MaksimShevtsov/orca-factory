@@ -74,10 +74,15 @@ for r in $ROLES; do
   warn=$(DRY_RUN=1 ./orca/dispatch.sh "$r" task_SELFTEST 2>&1 >/dev/null)
   case "$warn" in
     *"not in Orca's configured agent set"*) unconf="$unconf$r " ;;
+    *"is not installed on this host"*)      unconf="$unconf$r " ;;
   esac
 done
 N=$(echo "$ROLES" | wc -w | tr -d ' ')
-[ -z "$unconf" ] && gate roles PASS "$N/$N launchable" || gate roles FAIL "unconfigured: $unconf"
+# "configured+installed" is deliberately NOT "launchable". This gate cannot prove
+# an agent will accept a dispatch -- claude can exit at a consent screen and gemini
+# at an auth wall while both are configured and installed. Only a real dispatch
+# proves that, and this gate does not perform one.
+[ -z "$unconf" ] && gate roles PASS "$N/$N configured+installed" || gate roles FAIL "cannot launch: $unconf"
 
 # --- verdict -------------------------------------------------------------------
 if [ -n "$FAILED" ]; then echo "VERDICT: BLOCKED on $FAILED"; exit 1; fi

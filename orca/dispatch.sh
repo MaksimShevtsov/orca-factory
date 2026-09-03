@@ -2,6 +2,7 @@
 # Launch a role as a supervised Orca worker.
 #
 #   ./orca/dispatch.sh <role> <task_id> [extra worker-start args...]
+#   DRY_RUN=1 ./orca/dispatch.sh <role> <task_id>    # print, do not run
 #
 # Reads agent/model/effort from roles/<role>.md frontmatter so the role file
 # stays the single source of truth for which backend runs which seat.
@@ -30,33 +31,113 @@ fm() {
 AGENT="$(fm agent)"; MODEL="$(fm model)"; EFFORT="$(fm effort)"
 [ -n "$AGENT" ] || { echo "$ROLE: no agent in frontmatter" >&2; exit 2; }
 
-# Agents Orca has configured on this host. An agent outside this set fails with
-# `agent_unconfigured` — the SAME error Orca gives for a name that does not exist,
-# so the runtime message alone cannot tell you which mistake you made. Verified
-# 2026-09-03: `agy` is NOT configured; `opencode` is (it simply has no default args).
+# Agents Orca can launch itself with --agent. An agent outside this set can still
+# be driven, but only through the two-step path below.
 KNOWN_AGENTS="aider amp ante antigravity autohand claude claude-agent-teams cline codex
 command-code continue copilot crush cursor devin droid gemini grok hermes kimi kiro
 mistral-vibe openclaude opencode qwen-code rovo trae"
-case " $(echo $KNOWN_AGENTS) " in
-  *" $AGENT "*) ;;
-  *) echo "warning: '$AGENT' (roles/$ROLE.md) is not in Orca's configured agent set." >&2
-     echo "         worker-start will fail with agent_unconfigured. Known agents:" >&2
-     echo "$KNOWN_AGENTS" | tr ' ' '
-' | grep -v '^$' | sort | column -c 76 2>/dev/null        || echo "$KNOWN_AGENTS" >&2 ;;
-esac
 
-# Orca knowing the name is NOT proof the agent can run. Verified 2026-09-03 on
-# this host: `codex` is configured but not installed at all; `gemini` is both,
-# yet dies at an auth wall; `claude` is both, yet exits at its Bypass Permissions
-# consent screen. Installation is the cheapest of those to check, so check it.
+# Orca knowing a name is NOT proof the agent can run. Verified 2026-09-03 on this
+# host: codex is configured but not installed; gemini is both, and still dies at
+# an auth wall. Installation is the cheapest of those to check, so check it.
 if ! command -v "$AGENT" >/dev/null 2>&1; then
-  echo "warning: '$AGENT' (roles/$ROLE.md) is not installed on this host." >&2
-  echo "         Orca has it configured, but the binary is not on PATH, so the" >&2
-  echo "         terminal will open a shell and the dispatch will time out." >&2
+  echo "error: '$AGENT' (roles/$ROLE.md) is not installed on this host." >&2
+  echo "       The terminal would open a shell and the dispatch would time out." >&2
+  exit 2
 fi
 
+CONFIGURED=no
+case " $(echo $KNOWN_AGENTS) " in *" $AGENT "*) CONFIGURED=yes ;; esac
+
+echo "dispatch $ROLE -> agent=$AGENT model=${MODEL:-<agent config>} effort=${EFFORT:-n/a} (orca-launchable=$CONFIGURED)" >&2
+
+read -r -d '' PY_HANDLE <<'PY' || true
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+r = d.get("result") or {}
+t = r.get("terminal") or r
+print(t.get("handle") or r.get("handle") or "")
+PY
+
+read -r -d '' PY_WAIT <<'PY' || true
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+w = (d.get("result") or {}).get("wait") or {}
+print(w.get("satisfied"), w.get("blockedReason") or "")
+PY
+
+read -r -d '' PY_TITLE <<'PY' || true
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+r = d.get("result") or {}
+t = r.get("terminal") or r
+print((t.get("title") or "").lower())
+PY
+
+read -r -d '' PY_STALL <<'PY' || true
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+r = d.get("result") or {}
+if r.get("lastError") != "agent_prompt_stalled": sys.exit(0)
+h = ""
+for e in r.get("effects") or []:
+    if e.get("kind") == "terminal" and e.get("action") == "created":
+        h = e.get("id") or ""
+if h: print(h, r.get("dispatchId") or "")
+PY
+
+# ---------------------------------------------------------------------------
+# Two-step path: installed, but Orca cannot launch it with --agent.
+#
+# Verified with agy (Antigravity CLI 1.1.25, Gemini 3.8 Flash). Orca can still
+# SUPERVISE any agent once a terminal is running it: worker-start --terminal
+# injects the task and the agent reports worker_done normally. What Orca cannot
+# do for an unknown agent is START it.
+#
+# One-time cost per project: the agent's own workspace-trust prompt must be
+# accepted by hand. Until it is, terminal wait --for tui-idle returns
+# satisfied:false with a blockedReason. Afterwards a FRESH terminal is needed,
+# because the accepted prompt stays in the scrollback and keeps matching.
+# ---------------------------------------------------------------------------
+if [ "$CONFIGURED" = "no" ]; then
+  case "$AGENT" in
+    agy) LAUNCH="agy --dangerously-skip-permissions${MODEL:+ --model $MODEL}" ;;
+    *)   LAUNCH="$AGENT" ;;
+  esac
+
+  if [ -n "${DRY_RUN:-}" ]; then
+    echo "orca terminal create --worktree current --title worker-$ROLE --command '$LAUNCH' --json"
+    echo "orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 90000 --json"
+    echo "orca orchestration worker-start --task $TASK --terminal <handle> --worktree current $* --json"
+    exit 0
+  fi
+
+  HANDLE="$(orca terminal create --worktree current --title "worker-$ROLE" --command "$LAUNCH" --json 2>&1 | python -c "$PY_HANDLE" 2>/dev/null)"
+  [ -n "$HANDLE" ] || { echo "error: could not create a terminal for $AGENT" >&2; exit 1; }
+  echo "note: $AGENT is not Orca-launchable; started it in $HANDLE" >&2
+
+  WAIT="$(orca terminal wait --terminal "$HANDLE" --for tui-idle --timeout-ms 90000 --json 2>&1 | python -c "$PY_WAIT" 2>/dev/null)"
+  case "$WAIT" in
+    True*) ;;
+    *)
+      echo "error: $AGENT never became ready ($WAIT)" >&2
+      echo "       If the reason mentions trust, open $HANDLE in Orca, accept the" >&2
+      echo "       workspace-trust prompt once, then re-run this dispatch." >&2
+      exit 1 ;;
+  esac
+
+  exec orca orchestration worker-start --task "$TASK" --terminal "$HANDLE" --worktree current "$@" --json
+fi
+
+# ---------------------------------------------------------------------------
+# Normal path: Orca launches the agent itself.
 # --model/--effort are accepted only for these agents; --effort requires --model.
-# Every other agent takes its model from its own config (opencode: $ORCA_OPENCODE_CONFIG_DIR).
+# Every other agent takes its model from its own config.
+# ---------------------------------------------------------------------------
 ARGS=(orchestration worker-start --task "$TASK" --worktree current --agent "$AGENT")
 case "$AGENT" in
   claude|codex|cursor)
@@ -72,43 +153,22 @@ case "$AGENT" in
     ;;
 esac
 
-echo "dispatch $ROLE -> agent=$AGENT model=${MODEL:-<agent config>} effort=${EFFORT:-n/a}" >&2
-
-# DRY_RUN=1 prints the command instead of running it. Used by evals/run.sh.
 if [ -n "${DRY_RUN:-}" ]; then
-  printf 'orca'; printf ' %s' "${ARGS[@]}" "$@" --json; printf '
-'
+  printf 'orca'; printf ' %s' "${ARGS[@]}" "$@" --json; printf '\n'
   exit 0
 fi
 
-# NB: `set -e` is on and worker-start exits 1 on a failed dispatch ("exits 0 only
+# NB: set -e is on and worker-start exits 1 on a failed dispatch ("exits 0 only
 # for ready"), so this MUST be guarded -- otherwise the script dies here and the
 # recovery below can never run.
 OUT=""; RC=0
 OUT="$(orca "${ARGS[@]}" "$@" --json 2>&1)" || RC=$?
 
 # Fresh-launch race: some agents (verified with opencode 1.18.27) start fine but
-# worker-start reports `agent_prompt_stalled` at dispatch_input -- it gives up
-# before the TUI accepts input. The terminal it created is left RUNNING and
-# becomes idle a moment later, so the recovery is to reuse that exact terminal
-# rather than spawn another. Verified: --terminal on the stalled terminal
-# returns state=ready/stage=input_accepted and the worker reports worker_done.
-RECOVER="$(printf '%s' "$OUT" | python -c '
-import sys, json
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-r = d.get("result") or {}
-if r.get("lastError") != "agent_prompt_stalled":
-    sys.exit(0)
-h = ""
-for e in r.get("effects") or []:
-    if e.get("kind") == "terminal" and e.get("action") == "created":
-        h = e.get("id") or ""
-if h:
-    print(h, r.get("dispatchId") or "")
-' 2>/dev/null)"
+# worker-start reports agent_prompt_stalled at dispatch_input -- it gives up
+# before the TUI accepts input, leaving the terminal running. Reuse that exact
+# terminal rather than spawning another.
+RECOVER="$(printf '%s' "$OUT" | python -c "$PY_STALL" 2>/dev/null)"
 
 if [ -n "$RECOVER" ]; then
   HANDLE="${RECOVER%% *}"; PRIOR="${RECOVER##* }"
@@ -118,11 +178,7 @@ if [ -n "$RECOVER" ]; then
   # if that consent was never accepted -- the terminal falls back to a bare
   # shell, and a bare shell reports tui-idle just as happily as a ready agent.
   # Injecting a task spec there types it into PowerShell. Refuse instead.
-  TITLE="$(orca terminal show --terminal "$HANDLE" --json 2>/dev/null     | python -c 'import sys,json
-try: d=json.load(sys.stdin)
-except Exception: sys.exit(0)
-r=d.get("result") or {}; t=r.get("terminal") or r
-print((t.get("title") or "").lower())' 2>/dev/null)"
+  TITLE="$(orca terminal show --terminal "$HANDLE" --json 2>/dev/null | python -c "$PY_TITLE" 2>/dev/null)"
   case "$TITLE" in
     *powershell.exe*|*pwsh.exe*|*cmd.exe*|*bash.exe*|*/bin/sh*|*/bin/bash*)
       echo "error: $AGENT exited during startup; terminal $HANDLE is a bare shell" >&2
@@ -131,8 +187,7 @@ print((t.get("title") or "").lower())' 2>/dev/null)"
       echo "       default args need a one-time interactive consent (claude:" >&2
       echo "       --dangerously-skip-permissions). Accept it once in an Orca terminal," >&2
       echo "       or change the agent's default args in Orca settings." >&2
-      printf '%s
-' "$OUT"
+      printf '%s\n' "$OUT"
       exit 1 ;;
   esac
 
@@ -143,6 +198,5 @@ print((t.get("title") or "").lower())' 2>/dev/null)"
   exec orca "${RETRY[@]}" --json
 fi
 
-printf '%s
-' "$OUT"
+printf '%s\n' "$OUT"
 exit $RC
