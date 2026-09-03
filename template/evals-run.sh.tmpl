@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Gates for {{PROJECT}}.
+#
+# Prints the GATE/VERDICT block defined in roles/_common.md. Workers paste it
+# into their worker_done body, and the /goal evaluator reads it from the
+# transcript -- it cannot read files or run commands, so a result that is not
+# printed did not happen as far as it is concerned.
+#
+# Exit 0 = READY, exit 1 = BLOCKED.
+#
+# A gate whose command is absent reports SKIP, never PASS -- and an unconfigured
+# `tests` gate BLOCKS. A suite that passes because it ran nothing is worse than
+# no suite: it gets believed.
+set -uo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+FAILED=""
+SKIPPED=""
+gate() { # gate <name> <PASS|FAIL|SKIP> [detail]
+  printf 'GATE %-12s %-6s %s\n' "$1" "$2" "${3:-}"
+  [ "$2" = "FAIL" ] && [ -z "$FAILED" ] && FAILED="$1"
+  [ "$2" = "SKIP" ] && SKIPPED="$SKIPPED$1 "
+  return 0
+}
+
+# run <gate-name> <command...>  -- SKIP when the command is still a TODO.
+run() {
+  name="$1"; shift
+  case "$*" in
+    *TODO*|"") gate "$name" SKIP "no command configured - edit evals/run.sh"; return 0 ;;
+  esac
+  out=$("$@" 2>&1); rc=$?
+  tail=$(printf '%s' "$out" | tail -1 | cut -c1-60)
+  [ $rc -eq 0 ] && gate "$name" PASS "$tail" || gate "$name" FAIL "$tail"
+  return 0
+}
+
+run tests     {{TEST_CMD}}
+run lint      {{LINT_CMD}}
+run typecheck {{TYPECHECK_CMD}}
+
+# --- golden set ----------------------------------------------------------------
+# Cases live in evals/golden/{behavior,regression,incidents,agent-failures}/.
+# agent-failures is the class that pays for itself: every time an agent assumed
+# something instead of checking it, the assumption becomes a case here.
+golden=$(find evals/golden -name '*.yaml' -o -name '*.yml' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$golden" = "0" ]; then
+  gate golden SKIP "no cases yet"
+else
+  gate golden SKIP "$golden cases - wire up a runner in evals/run.sh"
+fi
+
+# --- cards ---------------------------------------------------------------------
+cards=$(ls cards/*.md 2>/dev/null | grep -v 'README' || true)
+if [ -z "$cards" ]; then
+  gate cards PASS "0 cards"
+else
+  noacc=""; n=0
+  for c in $cards; do
+    n=$((n+1))
+    grep -qi '^\*\*Acceptance:\*\*' "$c" || noacc="$noacc$(basename "$c") "
+  done
+  [ -z "$noacc" ] && gate cards PASS "$n/$n with acceptance" || gate cards FAIL "no acceptance: $noacc"
+fi
+
+# --- roles ---------------------------------------------------------------------
+# Reuses the guard in orca/dispatch.sh. NB: capture, do NOT pipe into `grep -q` --
+# under `set -o pipefail`, grep -q exits on first match, the upstream write takes
+# SIGPIPE and dies 141, and pipefail promotes it, so the test fails when it matches.
+ROLES=$(ls roles/*.md 2>/dev/null | grep -v '_common' | xargs -n1 basename | sed 's/\.md$//')
+unconf=""
+for r in $ROLES; do
+  warn=$(DRY_RUN=1 ./orca/dispatch.sh "$r" task_SELFTEST 2>&1 >/dev/null)
+  case "$warn" in
+    *"not in Orca's configured agent set"*) unconf="$unconf$r " ;;
+  esac
+done
+N=$(echo "$ROLES" | wc -w | tr -d ' ')
+[ -z "$unconf" ] && gate roles PASS "$N/$N launchable" || gate roles FAIL "unconfigured: $unconf"
+
+# --- verdict -------------------------------------------------------------------
+if [ -n "$FAILED" ]; then echo "VERDICT: BLOCKED on $FAILED"; exit 1; fi
+
+# An unconfigured `tests` gate is not a pass. A project that verified nothing
+# must never report READY -- that is the one outcome worse than reporting a
+# failure, because it gets believed.
+case " $SKIPPED " in
+  *" tests "*) echo "VERDICT: BLOCKED on tests (no test command configured - edit evals/run.sh)"; exit 1 ;;
+esac
+
+[ -n "$SKIPPED" ] && echo "note: skipped gates - $SKIPPED"
+echo "VERDICT: READY"
