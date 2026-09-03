@@ -1,0 +1,79 @@
+# The standard pipeline for one card.
+#
+# This is a template the coordinator instantiates per card, not a scheduler.
+# Orca does not read this file — `roles/pm.md` does, and turns it into
+# task-create calls with --deps. Keeping it declarative means the shape of the
+# work is reviewable in a diff instead of living in someone's head.
+
+stages:
+
+  - id: investigate
+    role: architect
+    when: the area is legacy, unfamiliar, or the card's cause is unknown
+    skill: skills/legacy-archaeology
+    produces: reports/investigations/<slug>.md
+    note: >
+      Skip only when the code is well understood and the card names its own
+      cause. Skipping this on legacy code is how a fix lands on the symptom.
+
+  - id: capture-behavior
+    role: architect
+    needs: [investigate]
+    when: the card touches behavior anyone depends on
+    skill: skills/behavior-capture
+    produces: docs/behavior/<domain>.md
+
+  - id: plan
+    role: planner
+    needs: [capture-behavior]
+    produces: cards/ — one card per independently completable change
+    gate:
+      question: Are the cards verifiable and correctly ordered?
+      options: [approve, revise]
+
+  - id: design
+    role: architect
+    needs: [plan]
+    when: the card changes an interface anything else depends on
+    produces: docs/decisions/ADR-<n>-<slug>.md
+    gate:
+      question: Approve the interface?
+      options: [approve, revise]
+
+  - id: implement
+    role: executor
+    needs: [design]
+    skill: superpowers:test-driven-development
+    produces: one branch, one card, a failing test before a passing one
+
+  - id: review
+    role: reviewer
+    needs: [implement]
+    produces: findings as file:line + failure scenario, or an explicit approval
+    gate:
+      question: Approve the merge?
+      options: [approve, reject]
+
+  - id: accept
+    role: qa-tester
+    needs: [review]
+    produces: acceptance run; bug cards for anything found
+
+  - id: reflect
+    role: any
+    needs: [accept]
+    when: something went wrong that could go wrong again
+    skill: skills/reflect
+    produces: docs/lessons/<yyyy-mm-dd>-<slug>.md
+
+# advisor is deliberately absent from the DAG. It is not a stage — it is
+# summoned by a blocked worker's `ask`, answered by the coordinator, and it
+# never holds a card. See roles/advisor.md.
+
+rules:
+  - Start every ready stage before waiting on any of them.
+  - Keep dependency chains under 3-4 deep; deeper and one slow worker stalls
+    everything behind it with no visible cause.
+  - A gate is a decision that is not a worker's to make. A worker's blocking
+    question is `ask`, not a gate.
+  - No card reaches accept without passing review. Not for a one-line fix.

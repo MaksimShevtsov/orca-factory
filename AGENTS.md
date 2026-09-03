@@ -1,0 +1,125 @@
+# AGENTS.md
+
+Instructions for every coding agent working in this repository — Claude Code,
+Codex, opencode, gemini, or any other. This file is a **map, not a manual**.
+It tells you where knowledge lives; it does not contain the knowledge.
+
+Claude Code reads `CLAUDE.md`, which points back here. They do not diverge.
+
+## What this repo is
+
+A factory: a set of roles, procedures and checks that a fleet of coding agents
+runs against a codebase. Orca coordinates the fleet. The repository holds the
+durable half — what we know, what must stay true, and how we prove it.
+
+## Who you are
+
+You were dispatched as a **role**. Before anything else, read:
+
+1. `roles/_common.md` — the contract binding every role
+2. `roles/<your-role>.md` — what only you own, and what you must not touch
+
+If you do not know your role, you are the **coordinator**. Read `roles/pm.md`.
+
+## Repository map
+
+| Need | Read |
+|---|---|
+| The contract you work under | `roles/_common.md` |
+| Your specific mandate | `roles/<role>.md` |
+| How work is coordinated | `orca/README.md` |
+| The task you were given | the card named in your task spec, under `cards/` |
+| What the system must keep doing | `docs/behavior/` |
+| Why the design is what it is | `docs/decisions/` |
+| Mistakes already made once | `docs/lessons/` |
+| Procedures that are not obvious | `skills/` |
+
+Read the closest relevant document. Do not load all documentation.
+
+## Coordination
+
+Orca owns live state; this repo owns durable state. Do not duplicate one in
+the other.
+
+- **Orca** — the task DAG, who holds what, dispatch, completion, questions,
+  gates. Task status is Orca's; there is no status field in this repo.
+- **Repo** — card specs and acceptance lines, behavior contracts, goldens,
+  decisions, lessons. Committed, reviewable, permanent.
+
+If you hold a live dispatch preamble:
+
+- Report exactly once with `worker_done`, with an explicit `--outcome`.
+- Blocked? Use `ask` and wait. Do not guess and proceed.
+- Never encode failure only in prose. `--outcome failed` is the signal.
+
+Only the coordinator dispatches. A worker that tries gets
+`nested_worker_depth_exceeded` — that is the design, not an obstacle to route
+around. Do the task yourself or `ask`.
+
+## Golden rules
+
+1. Never guess an API, schema, event shape, or business rule. Read it.
+2. Preserve existing behavior unless the card explicitly changes it.
+3. Before changing legacy behavior, reproduce it first.
+4. Every non-trivial bug fix adds a regression test or a golden case.
+5. Do not weaken a test to make a change pass. Ever.
+6. Do not modify code the card did not ask you to modify.
+7. Do not delete observability without replacing it with equal or better.
+8. Prefer an existing utility over a new duplicate.
+9. Validate data at the boundary, before it reaches business logic.
+10. If you did not run it, say you did not run it.
+
+## Evidence order
+
+When you claim something about the system, prefer evidence in this order:
+
+1. executable tests
+2. telemetry and logs
+3. the implementation
+4. generated artifacts
+5. documentation
+6. naming and convention
+7. assumption
+
+**Report conflicts rather than resolving them silently.** Documentation that
+disagrees with the implementation is a finding, not a detail to smooth over.
+
+## Working protocol
+
+For anything non-trivial:
+
+```
+investigate -> capture behavior -> plan -> implement -> verify -> review -> reflect
+```
+
+For legacy code, investigation is not optional and comes first. See
+`skills/legacy-archaeology/`.
+
+## Verification
+
+Every check ends by printing a block in exactly this shape, because the
+`/goal` evaluator and the reviewer read the transcript, not your files:
+
+```
+GATE tests       PASS   412/412
+GATE typecheck   PASS
+GATE golden      FAIL   49/50  behavior/refund-timeout
+VERDICT: BLOCKED on golden
+```
+
+`VERDICT` is `READY` or `BLOCKED on <gate>`. There is no score, no percentage,
+and no partial credit — a weighted number hides which class failed.
+
+Paste that block into your `worker_done` body verbatim.
+
+## Definition of done
+
+- the card's acceptance line is satisfied, and you quoted it
+- relevant tests and goldens pass, with the GATE block to prove it
+- no regression introduced
+- documentation updated if behavior or architecture changed
+- the change is reviewable: scoped to the card, nothing incidental
+
+**If verification is incomplete, say exactly what you did not verify.** An
+honest gap is worth more than a confident claim; the second one costs someone
+a day to discover.
