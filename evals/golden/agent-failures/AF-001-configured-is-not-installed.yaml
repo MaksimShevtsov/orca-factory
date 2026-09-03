@@ -1,0 +1,41 @@
+id: AF-001
+class: agent-failures
+title: An agent Orca "knows" is not necessarily installed
+source: session-failure 2026-09-03
+
+failure: >
+  The executor role was pointed at `codex` because Orca listed it as a
+  configured agent. codex was not installed on the host at all. The dispatch
+  opened a bare shell and died at agent_readiness/timeout, and the role could
+  never have run. The same session also assumed `agy` was unusable because
+  worker-start returned agent_unconfigured -- it was in fact installed and
+  perfectly drivable, just not launchable by Orca.
+
+root_cause: >
+  "Orca recognises the name" and "the agent can run here" are different facts.
+  Orca returns the identical `agent_unconfigured` error for a name it does not
+  know and for a name that is merely absent, so the runtime message cannot
+  distinguish them.
+
+guardrail: >
+  orca/dispatch.sh checks `command -v <agent>` before dispatching and refuses
+  with a non-zero exit and an explicit message. The agents gate in evals/run.sh
+  reports "configured+installed" rather than "launchable", because neither
+  check proves an agent will accept a dispatch.
+
+check: |
+  set -u
+  cd "$(git rev-parse --show-toplevel)"
+  probe='roles/.af001-probe.md'
+  trap 'rm -f "$probe"' EXIT
+  # A dotfile so it never matches roles/*.md and cannot disturb the other gates.
+  printf -- '---\nname: AF001\nagent: zz-definitely-not-installed\nmodel: none\neffort: low\n---\n\nSee roles/_common.md\n' > "$probe"
+  if out=$(DRY_RUN=1 ./orca/dispatch.sh .af001-probe task_AF001 2>&1); then
+    echo "REGRESSION: dispatch.sh accepted a role whose agent is not installed"
+    exit 1
+  fi
+  # NB: `case`, not `| grep -q` -- see AF-002.
+  case "$out" in
+    *"is not installed on this host"*) exit 0 ;;
+    *) echo "REGRESSION: refused, but without naming the cause:"; echo "$out"; exit 1 ;;
+  esac

@@ -32,7 +32,7 @@ Three categories of file, and which one a file is in decides who may edit it:
 
 | | Files | `update` |
 |---|---|---|
-| **Synced** | `roles/`, `skills/`, `orca/`, `cards/README.md`, `.gitattributes` | overwrites — the factory owns these |
+| **Synced** | `roles/`, `skills/`, `orca/`, `cards/README.md`, `.gitattributes`, `evals/golden/run.sh` | overwrites — the factory owns these |
 | **Templated** | `AGENTS.md`, `CLAUDE.md`, `evals/run.sh`, `docs/index.md` | never touches — generated once, yours after |
 | **Project** | `cards/`, `docs/`, `reports/`, `evals/golden/` | never touches — your content |
 
@@ -51,6 +51,8 @@ skills/            HOW  — the three procedures superpowers does not ship
 orca/              the control plane: loop, DAG, role -> launch command
 cards/             durable specs and acceptance lines
 evals/run.sh       the gates; prints the GATE/VERDICT block
+evals/golden/      the golden set + its runner; agent-failures/ holds
+                   mistakes agents actually made here, as running checks
 template/          what init renders into a new project
 bin/factory        init / update / check
 ```

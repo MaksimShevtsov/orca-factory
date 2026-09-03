@@ -44,11 +44,21 @@ run typecheck {{TYPECHECK_CMD}}
 # Cases live in evals/golden/{behavior,regression,incidents,agent-failures}/.
 # agent-failures is the class that pays for itself: every time an agent assumed
 # something instead of checking it, the assumption becomes a case here.
-golden=$(find evals/golden -name '*.yaml' -o -name '*.yml' 2>/dev/null | wc -l | tr -d ' ')
-if [ "$golden" = "0" ]; then
-  gate golden SKIP "no cases yet"
+if [ -x evals/golden/run.sh ]; then
+  gout="$(./evals/golden/run.sh 2>&1)"; grc=$?
+  gsum="$(printf '%s' "$gout" | tail -1)"
+  if [ $grc -eq 0 ]; then
+    case "$gsum" in
+      *"0/0"*) gate golden SKIP "no cases yet" ;;
+      *)       gate golden PASS "${gsum#GOLDEN }" ;;
+    esac
+  else
+    gate golden FAIL "${gsum#GOLDEN }"
+    printf '%s
+' "$gout" | grep -E '^  (FAIL|ERROR)' | sed 's/^/               /'
+  fi
 else
-  gate golden SKIP "$golden cases - wire up a runner in evals/run.sh"
+  gate golden SKIP "no runner at evals/golden/run.sh"
 fi
 
 # --- cards ---------------------------------------------------------------------

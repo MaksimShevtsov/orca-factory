@@ -1,0 +1,49 @@
+id: AF-003
+class: agent-failures
+title: "`set -e` kills a recovery path when the command it recovers from exits non-zero"
+source: session-failure 2026-09-03
+
+failure: >
+  orca/dispatch.sh gained a recovery path for dispatches that stall at prompt
+  injection. It produced no output at all and the recovery never ran once. The
+  first suspicion was a corrupted file rewrite; the file was fine.
+
+root_cause: >
+  `worker-start` exits 1 on a failed dispatch -- its own help says "exits 0 only
+  for ready". With `set -e` in force, the unguarded assignment
+  `OUT="$(orca ... )"` terminated the script at that line, before any of the
+  recovery logic below it could execute. The failure a recovery path exists to
+  handle was the exact failure that prevented it from running.
+
+guardrail: >
+  Every command whose non-zero exit is expected and handled must be guarded, so
+  `set -e` cannot pre-empt the handling. In dispatch.sh the worker-start call is
+  written `OUT="$(...)" || RC=$?`.
+
+check: |
+  set -u
+  cd "$(git rev-parse --show-toplevel)"
+  f=orca/dispatch.sh
+
+  # The script relies on set -e ...
+  case "$(cat "$f")" in
+    *"set -euo pipefail"*) ;;
+    *) echo "NOTE: $f no longer sets -e; this guardrail is moot"; exit 0 ;;
+  esac
+
+  # ... so the worker-start call it recovers from MUST be guarded.
+  if ! grep -n 'OUT="\$(orca .*)" *|| *RC=\$?' "$f" >/dev/null 2>&1; then
+    echo "REGRESSION: the worker-start call in $f is not guarded against set -e."
+    echo "Expected a line of the form:  OUT=\"\$(orca ... )\" || RC=\$?"
+    grep -n 'OUT=' "$f" | sed 's/^/    /'
+    exit 1
+  fi
+
+  # And prove the pattern actually survives set -e in this shell.
+  rc=0
+  bash -c 'set -e; out="$(false)" || rc=$?; echo reached' >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "REGRESSION: the guarded pattern did not survive set -e (exit $rc)"
+    exit 1
+  fi
+  exit 0

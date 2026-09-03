@@ -79,6 +79,27 @@ else
   [ -z "$noacc" ] && gate cards PASS "$n/$n with acceptance" || gate cards FAIL "no acceptance: $noacc"
 fi
 
+# --- golden set ----------------------------------------------------------------
+# Cases live in evals/golden/<class>/*.yaml. agent-failures is the class that pays
+# for itself: each case is a mistake an agent actually made here, turned into a
+# check that fails if the guardrail is ever removed.
+if [ -x evals/golden/run.sh ]; then
+  gout="$(./evals/golden/run.sh 2>&1)"; grc=$?
+  gsum="$(printf '%s' "$gout" | tail -1)"
+  if [ $grc -eq 0 ]; then
+    case "$gsum" in
+      *"0/0"*) gate golden SKIP "no cases yet" ;;
+      *)       gate golden PASS "${gsum#GOLDEN }" ;;
+    esac
+  else
+    gate golden FAIL "${gsum#GOLDEN }"
+    printf '%s
+' "$gout" | grep -E '^  (FAIL|ERROR)' | sed 's/^/               /'
+  fi
+else
+  gate golden SKIP "no runner at evals/golden/run.sh"
+fi
+
 # --- map: the entry points exist -----------------------------------------------
 missing=""
 for f in AGENTS.md CLAUDE.md roles/_common.md orca/README.md orca/pipeline.yaml cards/README.md; do

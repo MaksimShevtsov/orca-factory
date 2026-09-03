@@ -1,0 +1,49 @@
+id: AF-002
+class: agent-failures
+title: "`| grep -q` under `set -o pipefail` fails exactly when it matches"
+source: session-failure 2026-09-03
+
+failure: >
+  The agents gate reported "GATE agents PASS 7/7 launchable" while one role was
+  pointed at an agent Orca could not launch. The detection loop piped a command
+  into `grep -q` and tested the pipeline's exit status. It never fired, and the
+  gate gave a clean bill of health to a broken fleet.
+
+root_cause: >
+  `grep -q` exits the moment it finds a match. The upstream writer then takes
+  SIGPIPE and dies with 141. Under `set -o pipefail` the pipeline adopts that
+  141, so the `if` sees failure. The test therefore fails precisely when the
+  pattern IS present -- inverted, silently, only under pipefail.
+
+guardrail: >
+  No script in this repo pipes into `grep -q` while pipefail is set. Capture the
+  output into a variable and match it with `case`, which has no pipeline and no
+  early exit.
+
+check: |
+  set -u
+  cd "$(git rev-parse --show-toplevel)"
+
+  # 1. The trap is real, not folklore: prove the exit status is 141 today.
+  rc=0
+  bash -c 'set -o pipefail; yes | grep -q y' || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    echo "NOTE: this shell did not reproduce the SIGPIPE exit; guardrail still enforced below"
+  elif [ "$rc" -ne 141 ]; then
+    echo "unexpected exit $rc from the pipefail/grep -q demonstration"
+  fi
+
+  # 2. The guardrail: no pipefail script may pipe into grep -q.
+  bad=""
+  for f in $(git ls-files '*.sh' '*.tmpl'); do
+    grep -l 'set -[a-z]*o pipefail' "$f" >/dev/null 2>&1 || continue
+    if grep -n '| *grep -q' "$f" >/dev/null 2>&1; then
+      bad="$bad $f"
+    fi
+  done
+  if [ -n "$bad" ]; then
+    echo "REGRESSION: pipes into grep -q under pipefail:$bad"
+    for f in $bad; do grep -n '| *grep -q' "$f" | sed 's/^/    /'; done
+    exit 1
+  fi
+  exit 0

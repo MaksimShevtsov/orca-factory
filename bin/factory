@@ -15,7 +15,7 @@ set -uo pipefail
 FACTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 SYNCED_DIRS="roles skills"
-SYNCED_FILES="orca/README.md orca/dispatch.sh orca/pipeline.yaml cards/README.md .gitattributes"
+SYNCED_FILES="orca/README.md orca/dispatch.sh orca/pipeline.yaml cards/README.md .gitattributes evals/golden/run.sh"
 TEMPLATED="AGENTS.md CLAUDE.md evals/run.sh docs/index.md"
 STAMP=".factory-version"
 KIT_VERSION=1
