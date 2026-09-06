@@ -219,12 +219,13 @@ cmd_self_update() {
 }
 
 # Print the CHANGELOG.md section for <version> — `self-update` should say what
-# changed, not just that something did. Exact heading match, no regex on the
-# version string (dots would match anything).
+# changed, not just that something did. The heading is matched as a prefix
+# (Keep a Changelog appends " - date"), by string compare, not regex — dots in
+# a version would otherwise match anything.
 changelog_excerpt() {
   local ver="$1" entry
   entry="$(awk -v want="## [$ver]" '
-    $0 == want { insec = 1; next }
+    index($0, want) == 1 { insec = 1; next }
     insec && /^## / { exit }
     insec && NF { print }
   ' "$FACTORY/CHANGELOG.md" 2>/dev/null | head -15)"
