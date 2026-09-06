@@ -18,6 +18,13 @@ Any POSIX shell, or Git Bash on Windows; needs `git`. Clones the factory to
 directory is not on PATH, install.sh prints the line to add. Re-running the
 installer updates the clone.
 
+Or install the factory and initialize a project with the kit in one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MaksimShevtsov/orca-factory/main/install.sh \
+  | bash -s -- init ../my-service "What this system does, and who depends on it."
+```
+
 Keep the factory itself current with `factory self-update`, and the projects
 it installed with `factory update <target>`.
 

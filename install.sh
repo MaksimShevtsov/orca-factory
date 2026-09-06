@@ -3,6 +3,11 @@
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/MaksimShevtsov/orca-factory/main/install.sh)
 #
+# Or install the factory AND initialize a project with the kit, in one command:
+#
+#   curl -fsSL https://raw.githubusercontent.com/MaksimShevtsov/orca-factory/main/install.sh \
+#     | bash -s -- init ../my-service "What this system does, and who depends on it."
+#
 # Clones the factory to ~/.orca-factory and puts a `factory` shim on PATH
 # (~/.local/bin). Idempotent: re-running pulls the existing clone and rewrites
 # the shim. Needs git and a POSIX shell (Git Bash on Windows).
@@ -19,6 +24,17 @@ BIN_DIR="${FACTORY_BIN:-$HOME/.local/bin}"
 
 die() { echo "error: $*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
+
+# Optional mode: `init <target> [description...]` — after ensuring the factory,
+# run `factory init` on the target. No arguments means: install the factory only.
+MODE="" TARGET="" DESC=""
+if [ "${1:-}" = "init" ]; then
+  MODE=init
+  TARGET="${2:-}"
+  [ -n "$TARGET" ] || die "usage: install.sh init <target> [description...]"
+  shift 2
+  DESC="$*"
+fi
 
 command -v git >/dev/null 2>&1 || die "git is required"
 
@@ -60,6 +76,13 @@ case ":$PATH:" in
     say "    export PATH=\"$BIN_DIR:\$PATH\""
     ;;
 esac
+
+if [ "$MODE" = "init" ]; then
+  say ""
+  # exec: the init output (including its own "next" block) is the finale, and
+  # its exit code — success or "already initialized" failure — becomes ours.
+  exec "$DEST/bin/factory" init "$TARGET" "$DESC"
+fi
 
 say ""
 say "next:"

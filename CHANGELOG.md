@@ -7,6 +7,12 @@ All notable changes to the orca factory are documented here. The format is
 
 ## [Unreleased]
 
+### Added
+
+- `install.sh init <target> [description]` — install the factory and initialize
+  the kit into a project in one command:
+  `curl -fsSL ... | bash -s -- init <target> "description"`.
+
 ## [0.1.0] - 2026-09-06
 
 Initial public state of the kit, as installed from GitHub.
