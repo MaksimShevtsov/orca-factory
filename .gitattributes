@@ -7,6 +7,10 @@
 bin/* text eol=lf
 *.tmpl text eol=lf
 
+# Read line-wise by bin/factory and install.sh; a trailing CR would ride
+# along into every version comparison and printed line.
+VERSION text eol=lf
+
 # Keep the rest normalized too; agents diff these constantly.
 *.md text eol=lf
 *.yaml text eol=lf

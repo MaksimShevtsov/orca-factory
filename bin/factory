@@ -5,7 +5,7 @@
 #   bin/factory update [target]   re-sync the synced set, report drift
 #   bin/factory check  [target]   run the project's gates
 #   bin/factory self-update       update the factory clone itself (git pull)
-#   bin/factory version          print the factory version and commit
+#   bin/factory version           print the factory version and commit
 #
 # Three categories of file, and which one a file is in decides who may edit it:
 #
