@@ -5,6 +5,7 @@
 #   bin/factory update [target]   re-sync the synced set, report drift
 #   bin/factory check  [target]   run the project's gates
 #   bin/factory self-update       update the factory clone itself (git pull)
+#   bin/factory version          print the factory version and commit
 #
 # Three categories of file, and which one a file is in decides who may edit it:
 #
@@ -19,7 +20,11 @@ SYNCED_DIRS="roles skills"
 SYNCED_FILES="orca/README.md orca/dispatch.sh orca/pipeline.yaml cards/README.md .gitattributes evals/golden/run.sh"
 TEMPLATED="AGENTS.md CLAUDE.md evals/run.sh docs/index.md"
 STAMP=".factory-version"
+# KIT_VERSION is the STAMP SCHEMA version — it changes when .factory-version's
+# format changes, not when the factory ships. The factory's release version is
+# a separate concept, read from VERSION below.
 KIT_VERSION=1
+FACTORY_VERSION="$(sed -n '1p' "$FACTORY/VERSION" 2>/dev/null || echo unknown)"
 
 die() { echo "error: $*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
@@ -194,16 +199,46 @@ cmd_self_update() {
     || die "self-update needs a git clone; $FACTORY is not one"
   git -C "$FACTORY" diff --quiet && git -C "$FACTORY" diff --cached --quiet \
     || die "local changes in $FACTORY — commit or revert them; an installed factory tracks upstream"
-  local old new out
-  old="$(git -C "$FACTORY" rev-parse --short HEAD)"
-  say "self-update $FACTORY  (was $old)"
+  local old_sha new_sha old_ver new_ver out
+  old_sha="$(git -C "$FACTORY" rev-parse --short HEAD)"
+  old_ver="$(sed -n '1p' "$FACTORY/VERSION" 2>/dev/null || echo unknown)"
+  say "self-update $FACTORY  (was $old_sha)"
   out="$(git -C "$FACTORY" pull --ff-only 2>&1)" || die "git pull failed: $out"
-  new="$(git -C "$FACTORY" rev-parse --short HEAD)"
-  if [ "$old" = "$new" ]; then
-    say "  current    $new"
-  else
-    say "  updated    $old -> $new"
+  new_sha="$(git -C "$FACTORY" rev-parse --short HEAD)"
+  new_ver="$(sed -n '1p' "$FACTORY/VERSION" 2>/dev/null || echo unknown)"
+
+  if [ "$old_sha" = "$new_sha" ]; then
+    say "  current    $new_ver ($new_sha)"
+    return 0
   fi
+  say "  updated    $old_sha -> $new_sha"
+  if [ "$old_ver" != "$new_ver" ]; then
+    say "  version    $old_ver -> $new_ver"
+    changelog_excerpt "$new_ver"
+  fi
+}
+
+# Print the CHANGELOG.md section for <version> — `self-update` should say what
+# changed, not just that something did. Exact heading match, no regex on the
+# version string (dots would match anything).
+changelog_excerpt() {
+  local ver="$1" entry
+  entry="$(awk -v want="## [$ver]" '
+    $0 == want { insec = 1; next }
+    insec && /^## / { exit }
+    insec && NF { print }
+  ' "$FACTORY/CHANGELOG.md" 2>/dev/null | head -15)"
+  [ -n "$entry" ] || return 0
+  say ""
+  say "  what's new in $ver:"
+  printf '%s\n' "$entry" | sed 's/^/    /'
+}
+
+# --------------------------------------------------------------------- version
+cmd_version() {
+  local sha
+  sha="$(git -C "$FACTORY" rev-parse --short HEAD 2>/dev/null || echo uncommitted)"
+  say "orca factory $FACTORY_VERSION ($sha)"
 }
 
 case "${1:-}" in
@@ -211,5 +246,6 @@ case "${1:-}" in
   update)      shift; cmd_update "$@" ;;
   check)       shift; cmd_check "$@" ;;
   self-update) shift; cmd_self_update "$@" ;;
-  *) sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  version)     shift; cmd_version "$@" ;;
+  *) sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -37,6 +37,7 @@ else
 fi
 
 sha="$(git -C "$DEST" rev-parse --short HEAD)"
+ver="$(sed -n '1p' "$DEST/VERSION" 2>/dev/null || echo unknown)"
 
 mkdir -p "$BIN_DIR" || die "cannot create $BIN_DIR"
 shim="$BIN_DIR/factory"
@@ -48,7 +49,7 @@ shim="$BIN_DIR/factory"
 chmod +x "$shim" 2>/dev/null || say "! could not chmod +x $shim"
 
 say ""
-say "installed  $DEST  ($sha)"
+say "installed  $DEST  ($ver, $sha)"
 say "shim       $shim"
 
 case ":$PATH:" in

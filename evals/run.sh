@@ -102,10 +102,10 @@ fi
 
 # --- map: the entry points exist -----------------------------------------------
 missing=""
-for f in AGENTS.md CLAUDE.md roles/_common.md orca/README.md orca/pipeline.yaml cards/README.md; do
+for f in AGENTS.md CLAUDE.md roles/_common.md orca/README.md orca/pipeline.yaml cards/README.md VERSION CHANGELOG.md; do
   [ -f "$f" ] || missing="$missing$f "
 done
-[ -z "$missing" ] && gate map PASS "6/6 present" || gate map FAIL "missing: $missing"
+[ -z "$missing" ] && gate map PASS "8/8 present" || gate map FAIL "missing: $missing"
 
 if [ -n "$FAILED" ]; then echo "VERDICT: BLOCKED on $FAILED"; exit 1; fi
 echo "VERDICT: READY"
