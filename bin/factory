@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Install and update the copilot factory kit in a project.
+# Install and update the orca factory kit in a project.
 #
 #   bin/factory init   <target>   copy the kit into a project, render templates
 #   bin/factory update [target]   re-sync the synced set, report drift
 #   bin/factory check  [target]   run the project's gates
+#   bin/factory self-update       update the factory clone itself (git pull)
 #
 # Three categories of file, and which one a file is in decides who may edit it:
 #
@@ -124,7 +125,7 @@ write_stamp() {
   local t="$1" sha
   sha="$(cd "$FACTORY" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
   {
-    echo "# Written by the copilot factory. Do not edit by hand."
+    echo "# Written by the orca factory. Do not edit by hand."
     echo "version=$KIT_VERSION"
     echo "source_commit=$sha"
     echo "initialized=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -187,9 +188,28 @@ cmd_check() {
   ( cd "$t" && ./evals/run.sh )
 }
 
+# ---------------------------------------------------------------- self-update
+cmd_self_update() {
+  git -C "$FACTORY" rev-parse --git-dir >/dev/null 2>&1 \
+    || die "self-update needs a git clone; $FACTORY is not one"
+  git -C "$FACTORY" diff --quiet && git -C "$FACTORY" diff --cached --quiet \
+    || die "local changes in $FACTORY — commit or revert them; an installed factory tracks upstream"
+  local old new out
+  old="$(git -C "$FACTORY" rev-parse --short HEAD)"
+  say "self-update $FACTORY  (was $old)"
+  out="$(git -C "$FACTORY" pull --ff-only 2>&1)" || die "git pull failed: $out"
+  new="$(git -C "$FACTORY" rev-parse --short HEAD)"
+  if [ "$old" = "$new" ]; then
+    say "  current    $new"
+  else
+    say "  updated    $old -> $new"
+  fi
+}
+
 case "${1:-}" in
-  init)   shift; cmd_init "$@" ;;
-  update) shift; cmd_update "$@" ;;
-  check)  shift; cmd_check "$@" ;;
-  *) sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  init)        shift; cmd_init "$@" ;;
+  update)      shift; cmd_update "$@" ;;
+  check)       shift; cmd_check "$@" ;;
+  self-update) shift; cmd_self_update "$@" ;;
+  *) sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

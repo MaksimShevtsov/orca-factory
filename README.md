@@ -1,4 +1,4 @@
-# copilot factory
+# orca factory
 
 A kit for running a fleet of coding agents against a codebase: roles,
 procedures, gates, and the Orca control plane that coordinates them.
@@ -6,6 +6,20 @@ procedures, gates, and the Orca control plane that coordinates them.
 This repo is both the source of the kit and a working instance of it — the
 roles here are the ones that get installed, so a broken role breaks the factory
 first and you find out here rather than in a generated project.
+
+## Install
+
+```sh
+bash <(curl -fsSL https://raw.githubusercontent.com/MaksimShevtsov/orca-factory/main/install.sh)
+```
+
+Any POSIX shell, or Git Bash on Windows; needs `git`. Clones the factory to
+`~/.orca-factory` and puts a `factory` shim in `~/.local/bin` — if that
+directory is not on PATH, install.sh prints the line to add. Re-running the
+installer updates the clone.
+
+Keep the factory itself current with `factory self-update`, and the projects
+it installed with `factory update <target>`.
 
 ## Start a new project
 
